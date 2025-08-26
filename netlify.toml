@@ -1,0 +1,18 @@
+[build]
+  publish = "/"
+  command = "echo 'No build needed'"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/webhook"
+  to = "/.netlify/functions/app/webhook"
+  status = 200
+
+[[redirects]]
+  from = "/set_webhook"
+  to = "/.netlify/functions/app/set_webhook"
+  status = 200
