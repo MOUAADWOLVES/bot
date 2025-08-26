@@ -1,0 +1,1450 @@
+import os
+import telebot
+import youtube_search
+import yt_dlp
+import time
+import re
+import requests
+from io import BytesIO
+import json
+from threading import Thread
+import logging
+import schedule
+from threading import Thread as threading_Thread
+import random
+import string
+from datetime import datetime, timedelta
+import base64
+
+# إعدادات التسجيل
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# توكن البوت
+BOT_TOKEN = "8390149006:AAFSy4v-lir3S_GrGBFKXNoVy9sR_jgn23g"
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# إعدادات البوت
+BOT_NAME = "⌯𝗠𝗢𝗨𝗔𝗔𝗗"
+CHANNEL_LINK = "https://t.me/UPDATE_GATTOUZ"
+CHANNEL_USERNAME = "UPDATE_GATTOUZ"  # بدون @
+search_results = {}
+
+# مجلد التخزين المؤقت للملفات
+if not os.path.exists("downloads"):
+    os.makedirs("downloads")
+
+# ملفات التخزين
+ADMINS_FILE = "admins.json"
+GROUP_SETTINGS_FILE = "group_settings.json"
+GROUP_ROLES_FILE = "group_roles.json"
+USER_DATA_FILE = "user_data.json"
+CODES_FILE = "codes.json"
+DEVELOPER_DATA_FILE = "developer.json"
+USER_PHOTOS_FILE = "user_photos.json"
+# نقل هذا الجزء إلى أعلى الملف بعد تعريف المتغيرات مباشرة
+def send_subscription_message(chat_id, user_id):
+    try:
+        markup = telebot.types.InlineKeyboardMarkup()
+        channel_btn = telebot.types.InlineKeyboardButton("اشترك في القناة أولاً ✅", url=CHANNEL_LINK)
+        check_btn = telebot.types.InlineKeyboardButton("تأكيد الاشتراك ♻️", callback_data=f"check_sub_{user_id}")
+        markup.add(channel_btn)
+        markup.add(check_btn)
+        
+        bot.send_message(chat_id, f"📢 يرجى الاشتراك في قناتنا أولاً لتتمكن من استخدام البوت:\n{CHANNEL_LINK}", reply_markup=markup)
+    except Exception as e:
+        logger.error(f"خطأ في إرسال رسالة الاشتراك: {e}")
+
+# ثم بعدها مباشرة ضع دالة التحقق من الاشتراك
+def check_subscription(user_id):
+    # المطور والمالك لا يحتاجون للاشتراك
+    if is_owner(user_id) or is_admin(user_id):
+        return True
+    
+    try:
+        # الحصول على معلومات العضو في القناة
+        chat_member = bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+        
+        # التحقق من حالة العضو
+        if chat_member.status in ['member', 'administrator', 'creator']:
+            return True
+        else:
+            return False
+            
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من الاشتراك: {e}")
+        # في حالة الخطأ، نعتبر أن المستخدم مشترك لتجنب منع الخدمة
+        return True
+# قائمة الآيات القرآنية
+QURAN_VERSES = [
+    "(وَيَشْفِ صُدُورَ قَوْمٍ مُؤْمِنِينَ). [التوبة: 14]",
+    "(وَإِذَا مَرِضْتُ فَهُوَ يَشْفِينِ). [الشعراء: 80]",
+    "(قَدْ جَاءَتْكُمْ مَوْعِظَةٌ مِنْ رَبِّكُمْ وَشِفَاءٌ لِمَا فِي الصُّدُورِ). [يونس: 57]",
+    "(يَخْرُجُ مِنْ بُطُونِهَا شَرَابٌ مُخْتَلِفٌ أَلْوَانُهُ فِيهِ شِفَاءٌ لِلنَّاسِ). [النحل: 69]",
+    "(وَنُنَزِّلُ مِنَ الْقُرْآنِ مَا هُوَ شِفَاءٌ وَرَحْمَةٌ لِلْمُؤْمِنِينَ). [الإسراء: 82]",
+    "(قُلْ هُوَ لِلَّذِينَ آمَنُوا هُدًى وَشِفَاءٌ). [فصلت: 44]",
+    "(أَلَمۡ يَأۡنِ لِلَّذِينَ ءَامَنُوۤا۟ أَن تَخۡشَعَ قُلُوبُهُمۡ لِذِكۡرِ ٱللَّهِ وَمَا نَزَلِ مِنَ ٱلۡحَقِّ وَلَا يَكُونُوا۟ كَٱلَّذِينَ أُوتُوا۟ ٱلۡكِتَـٰبَ مِن قَبۡلُ فَطَالَ عَلَيۡهِمُ ٱلۡأَمَدُ فَقَسَتۡ قُلُوبُهُمۡۖ وَكَثِيرࣱ مِّنۡهُمۡ فَـٰسِقُونَ). [الحديد: 16]",
+    "(يَوۡمَ يَقُومُ ٱلۡمُنَـٰفِقُونَ وَٱلۡمُنَـٰفِقَـٰتُ لِلَّذِينَ ءَآمَنُوا۟ ٱنظُرُونَا نَقۡتَبِسۡ مِن نُّورِكُمۡ قِيلَ ٱرۡجِعُوا۟ وَرَاۤءَكُمۡ فَٱلۡتَمِسُوا۟ نُورࣰاۖ فَضُرِبَ بَيۡنَهُم بِسُورࣲ لَّهُۥ بَاطِنُهُۥ فِيهِ ٱلرَّحۡمَةُ وَظَـٰهِرُهُۥ مِن قِبَلِهِ ٱلۡعَذَابُ يُنَادُونَهُمۡ أَلَمۡ نَكُن مَّعَكُمۡۖ قَالُوا۟ بَلَىٰ وَلَـٰكِنَّكُمۡ فَتَنتُمۡ أَنفُسَكُمۡ وَتَرَبَّصۡتُمۡ وَٱرۡتَبۡتُمۡ وَغَرَّتۡكُمُ ٱلۡأَمَانِيُّ حَتَّىٰ جَاۤءَ أَمۡرُ ٱللَّهِ وَغَرَّكُم بِٱللَّهِ ٱلۡغَرُورُ). [الحديد: 13-14]",
+    "(إِنَّ ٱلۡمُصَّدِّقِينَ وَٱلۡمُصَّدِّقَـٰتِ وَأَقۡرَضُوا۟ ٱللَّهَ قَرۡضًا حَسَنࣰا يُضَـٰعَفُ لَهُمۡ وَلَهُمۡ أَجۡرࣱ كَرِيمࣱ). [الحديد: 18]",
+    "(وَٱسۡتَعِينُوا۟ بِٱلصَّبۡرِ وَٱلصَّلَوٰةِۚ وَإِنَّهَا لَكَبِيرَةٌ إِلَّا عَلَى ٱلۡخَـٰشِعِينَ). [البقرة: 45]",
+    "(وَٱتَّقُوا۟ يَوۡمࣰا لَّا تَجۡزِي نَفۡسٌ عَن نَّفْسࣲ شَيۡـࣰٔا وَلَا يُقۡبَلُ مِنۡهَا شَفَـٰعَةࣱ وَلَا يُؤۡخَذُ مِنۡهَا عَدۡلࣱ وَلَا هُمۡ يُنصَرُونَ). [البقرة: 48]",
+    "(إِنَّ ٱلَّذِينَ ءَآمَنُوا۟ وَٱلَّ�ِينَ هَادُوا۟ وَٱلنَّصَـٰرَىٰ وَٱلصَّـٰبِـٔينَ مَنۡ ءَآمَنَ بِٱللَّهِ وَٱلۡيَوۡمِ ٱلۡـَٔاخِرِ وَعَمِلَ صَـٰلِحࣰا فَلَهُمۡ أَجۡرُهُمۡ عِندَ رَبِّهِمۡ وَلَا خَوۡفٌ عَلَيۡهِمۡ وَلَا هُمۡ يَحۡزَنُونَ). [البقرة: 62]",
+    "(ٱلَّذِينَ إِذَاۤ أَصَـٰبَتۡهُم مُّصِيبَةࣱ قَالُوۤا۟ إِنَّا لِلَّهِ وَإِنَّاۤ إِلَيۡهِ رَ ⁠ٰجِعُونَ). [البقرة: 156]",
+    "(رَّبِّ ٱغۡفِرۡ لِي وَلِوَ ⁠ٰلِدَيَّ وَلِمَن دَخَلَ بَيۡتِيَ مُؤۡمِنࣰا وَلِلۡمُؤۡمِنِينَ وَٱلۡمُؤۡمِنَـٰتِۖ وَلَا تَزِدِ ٱلظَّـٰلِمِينَ إِلَّا تَبَارَۢا). [نوح: 28]",
+    "(وَأَنَّ ٱلۡمَسَـٰجِدَ لِلَّهِ فَلَا تَدۡعُوا۟ مَعَ ٱللَّهِ أَحَدࣰا وَأَنَّهُۥ لَمَّا قَامَ عَبۡدُ ٱللَّهِ يَدۡعُوهُ كَادُوا۟ يَكُونُونَ عَلَيۡهِ لِبَدࣰا). [الجن: 18]",
+    "(وَٱذۡكُرِ ٱسۡمَ رَبِّكَ وَتَبَتَّلۡ إِلَيۡهِ تَبۡتِيلࣰا رَّبُّ ٱلۡمَشۡرِقِ وَٱلۡمَغۡرِبِ لَاۤ إِلَـٰهَ إِلَّا هُوَ فَٱتَّخِذۡهُ وَكِيلࣰا وَٱصۡبِرۡ عَلَىٰ مَا يَقُولُونَ وَٱهۡجُرۡهُمۡ هَجۡرࣰا جَمِيلࣰا). [المزمل: 8-10]"
+]
+
+verse_index = 0
+send_verses_enabled = True
+
+# قائمة المهن
+JOBS = {
+    "طبيب": {"min_salary": 5000, "max_salary": 15000, "emoji": "👨‍⚕️"},
+    "مهندس": {"min_salary": 4500, "max_salary": 12000, "emoji": "👨‍💻"},
+    "معلم": {"min_salary": 3000, "max_salary": 8000, "emoji": "👨‍🏫"},
+    "تاجر": {"min_salary": 4000, "max_salary": 20000, "emoji": "👨‍💼"},
+    "سائق": {"min_salary": 2000, "max_salary": 5000, "emoji": "🚗"},
+    "نجار": {"min_salary": 2500, "max_salary": 6000, "emoji": "🔨"},
+    "خباز": {"min_salary": 2000, "max_salary": 4500, "emoji": "🍞"},
+    "مزارع": {"min_salary": 1500, "max_salary": 4000, "emoji": "👨‍🌾"},
+    "شرطي": {"min_salary": 3500, "max_salary": 9000, "emoji": "👮"},
+    "محاسب": {"min_salary": 3000, "max_salary": 7000, "emoji": "📊"},
+    "مبرمج": {"min_salary": 4000, "max_salary": 15000, "emoji": "💻"},
+    "سباك": {"min_salary": 2500, "max_salary": 6000, "emoji": "🔧"},
+    "كهربائي": {"min_salary": 2500, "max_salary": 6000, "emoji": "⚡"},
+    "نادل": {"min_salary": 1500, "max_salary": 3500, "emoji": "🍽️"},
+    "حلاق": {"min_salary": 2000, "max_salary": 5000, "emoji": "✂️"}
+}
+
+# تحميل البيانات
+def load_data(filename, default={}):
+    try:
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    return default
+
+def save_data(filename, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# تحميل جميع البيانات
+admins_data = load_data(ADMINS_FILE, {"owner": 5545019702, "admins": [5545019702]})
+group_settings = load_data(GROUP_SETTINGS_FILE)
+group_roles = load_data(GROUP_ROLES_FILE)
+user_data = load_data(USER_DATA_FILE)
+codes_data = load_data(CODES_FILE)
+developer_data = load_data(DEVELOPER_DATA_FILE, {"photo_id": None, "photo_url": None})
+user_photos = load_data(USER_PHOTOS_FILE)
+
+# وظائف المساعدة
+def is_owner(user_id):
+    return admins_data.get("owner") == user_id
+
+def is_admin(user_id):
+    return user_id in admins_data.get("admins", []) or is_owner(user_id)
+
+def is_group_chat(chat_id):
+    try:
+        chat = bot.get_chat(chat_id)
+        return chat.type in ['group', 'supergroup']
+    except:
+        return False
+
+def get_user_role(chat_id, user_id):
+    chat_id_str = str(chat_id)
+    user_id_str = str(user_id)
+    
+    if chat_id_str in group_roles:
+        if user_id_str in group_roles[chat_id_str].get('admins', []):
+            return 'admin'
+        elif user_id_str in group_roles[chat_id_str].get('vips', []):
+            return 'vip'
+    
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        if member.status in ['administrator', 'creator']:
+            return 'group_admin'
+    except:
+        pass
+    
+    return 'member'
+
+def can_manage_users(chat_id, user_id):
+    role = get_user_role(chat_id, user_id)
+    return role in ['admin', 'group_admin'] or is_admin(user_id)
+
+def can_use_bot_commands(chat_id, user_id):
+    role = get_user_role(chat_id, user_id)
+    return role in ['admin', 'vip', 'group_admin'] or is_admin(user_id)
+
+def get_user_data(user_id):
+    user_id_str = str(user_id)
+    if user_id_str not in user_data:
+        user_data[user_id_str] = {
+            "money": 1000,
+            "job": None,
+            "last_salary": None,
+            "married_to": None,
+            "last_daily": None,
+            "bank_account": None,
+            "messages_count": 0,
+            "rob_count": 0,
+            "rob_success": 0,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        save_data(USER_DATA_FILE, user_data)
+    return user_data[user_id_str]
+
+def update_user_data(user_id, data):
+    user_id_str = str(user_id)
+    user_data[user_id_str] = data
+    save_data(USER_DATA_FILE, user_data)
+
+# حساب تاريخ إنشاء الحساب بشكل صحيح
+def get_account_creation_date(user_id):
+    user_info = get_user_data(user_id)
+    
+    if "created_at" in user_info:
+        return user_info["created_at"]
+    else:
+        # حساب تقريبي من ID المستخدم (إذا لم يكن التاريخ محفوظاً)
+        timestamp = (user_id - 1000000000000) // 1000000
+        if timestamp > 0:
+            try:
+                creation_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+                user_info["created_at"] = creation_date
+                update_user_data(user_id, user_info)
+                return creation_date
+            except:
+                return "2023-01-01 00:00:00"
+        else:
+            return "2023-01-01 00:00:00"
+
+# الحصول على صورة المستخدم
+def get_user_photo(user_id):
+    user_id_str = str(user_id)
+    if user_id_str in user_photos:
+        return user_photos[user_id_str]
+    return None
+
+# حفظ صورة المستخدم
+def save_user_photo(user_id, photo_id, photo_url):
+    user_id_str = str(user_id)
+    user_photos[user_id_str] = {
+        "photo_id": photo_id,
+        "photo_url": photo_url,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    save_data(USER_PHOTOS_FILE, user_photos)
+
+# وظائف اليوتيوب
+def download_audio_method1(url, video_id):
+    try:
+        ydl_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio',
+            'outtmpl': f"downloads/{video_id}.%(ext)s",
+            'quiet': True,
+            'no_warnings': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        for ext in ['m4a', 'webm', 'mp3']:
+            if os.path.exists(f"downloads/{video_id}.{ext}"):
+                return f"downloads/{video_id}.{ext}"
+        return None
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return None
+
+# وظائف الآيات القرآنية
+def send_quran_verses():
+    global verse_index
+    if not send_verses_enabled:
+        return
+    try:
+        for chat_id_str in group_settings.keys():
+            try:
+                chat_id = int(chat_id_str)
+                if group_settings[chat_id_str].get('quran', True):
+                    verse = QURAN_VERSES[verse_index]
+                    bot.send_message(chat_id, f"📖 آية قرآنية:\n\n{verse}")
+            except Exception as e:
+                logger.error(f"Error sending verse: {e}")
+        verse_index = (verse_index + 1) % len(QURAN_VERSES)
+    except Exception as e:
+        logger.error(f"Error in send_quran_verses: {e}")
+
+def schedule_verses():
+    schedule.every(15).minutes.do(send_quran_verses)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+verse_thread = threading_Thread(target=schedule_verses)
+verse_thread.daemon = True
+verse_thread.start()
+
+# التحقق من الاشتراك في القناة
+def check_subscription(user_id):
+    # المطور والمالك لا يحتاجون للاشتراك
+    if is_owner(user_id) or is_admin(user_id):
+        return True
+    
+    try:
+        # الحصول على معلومات العضو في القناة
+        chat_member = bot.get_chat_member(f"@{CHANNEL_USERNAME}", user_id)
+        
+        # التحقق من حالة العضو
+        if chat_member.status in ['member', 'administrator', 'creator']:
+            return True
+        else:
+            return False
+            
+    except Exception as e:
+        logger.error(f"خطأ في التحقق من الاشتراك: {e}")
+        # في حالة الخطأ، نعتبر أن المستخدم مشترك لتجنب منع الخدمة
+        return True
+
+# معالجة الردود على أزرار التأكيد
+@bot.callback_query_handler(func=lambda call: call.data.startswith('check_sub_'))
+def handle_check_subscription(call):
+    user_id = int(call.data.split('_')[-1])
+    if check_subscription(user_id):
+        bot.answer_callback_query(call.id, "✅ تم التحقق من الاشتراك، يمكنك استخدام البوت الآن!")
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+    else:
+        bot.answer_callback_query(call.id, "❌ لم تشترك بعد، يرجى الاشتراك أولاً ثم المحاولة مرة أخرى!")
+# وظائف خاصة بالمطور
+def get_developer_photo():
+    """الحصول على صورة المطور وتحديثها"""
+    try:
+        # الحصول على معلومات المطور
+        dev_user = bot.get_chat(5545019702)
+        
+        if dev_user.photo:
+            # الحصول على أكبر حجم للصورة
+            file_info = bot.get_file(dev_user.photo.big_file_id)
+            downloaded_file = bot.download_file(file_info.file_path)
+            
+            # حفظ الصورة مؤقتاً
+            with open("developer_photo.jpg", "wb") as photo_file:
+                photo_file.write(downloaded_file)
+            
+            # حفظ معلومات الصورة
+            developer_data["photo_id"] = dev_user.photo.big_file_id
+            developer_data["photo_url"] = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+            save_data(DEVELOPER_DATA_FILE, developer_data)
+            
+            return downloaded_file
+    except Exception as e:
+        logger.error(f"Error getting developer photo: {e}")
+    
+    return None
+
+# --- الأوامر الرئيسية ---
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    user_id = message.from_user.id
+    
+    # التحقق من الاشتراك
+    if not check_subscription(user_id):
+        send_subscription_message(message.chat.id, user_id)
+        return
+        
+    if is_group_chat(message.chat.id):
+        role = get_user_role(message.chat.id, message.from_user.id)
+        role_text = {
+            'admin': 'مشرف البوت', 'vip': 'مميز',
+            'group_admin': 'مشرف المجموعة', 'member': 'عضو'
+        }.get(role, 'عضو')
+        
+        text = f"مرحبًا! أنا بوت المساعدة. رتبتك: {role_text}\n\n"
+        text += "الأوامر المتاحة:\n"
+        text += "الاعدادات - لإظهار إعدادات الحماية\n"
+        
+        if can_manage_users(message.chat.id, message.from_user.id):
+            text += "كتم/حظر/فك كتم/فك حظر - لإدارة الأعضاء (بالرد)\n"
+            text += "رفع مشرف/تنزيل مشرف/رفع مميز/تنزيل مميز - لإدارة الأدوار (بالرد)\n"
+        
+        bot.reply_to(message, text)
+    else:
+        welcome_text = f"""*▶️ | مرحباً بك في بوت {BOT_NAME}*\n\n
+*◈ | للبحث عن فيديو:*
+`يوت` + كلمة البحث
+
+*◈ | مثال:* `يوت أغنية جميلة`
+
+*◈ | البوت يدعم المجموعات أيضاً*"""
+        
+        markup = telebot.types.InlineKeyboardMarkup()
+        add_to_group_btn = telebot.types.InlineKeyboardButton("اضفني في مجموعتك ✅", url="https://t.me/Kfkfkhjjfkbot?startgroup=true")
+        
+        # إضافة زر المطور الشفاف إذا كان المستخدم هو المطور
+        if user_id == 5545019702:
+            dev_btn = telebot.types.InlineKeyboardButton("🔳", url="tg://user?id=5545019702")
+            markup.add(add_to_group_btn, dev_btn)
+        else:
+            markup.add(add_to_group_btn)
+        
+        bot.reply_to(message, welcome_text, reply_markup=markup, parse_mode="Markdown")
+
+# --- أوامر التسلية ---
+@bot.message_handler(func=lambda m: m.text and m.text.lower() in ['كت', 'نرد', 'زوجني', 'احبك', 'بوسه', 'بوسة', 'تفاصيل', 'هينه', 'هينهي', 'هينها', 'ثث'])
+def entertainment_commands(message):
+    if not is_group_chat(message.chat.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    text = message.text.lower()
+    user_name = message.from_user.first_name
+            
+    if text == 'كت':
+        replies = [f"وينه الكت {user_name}؟ 🤔", f"الكت مع {user_name} ضاع! 😅"]
+        bot.reply_to(message, random.choice(replies))
+        
+    elif text == 'نرد':
+        dice_value = random.randint(1, 6)
+        bot.reply_to(message, f"طلع لك {dice_value} 🎲")
+        
+    elif text == 'زوجني':
+        if message.reply_to_message:
+            target_name = message.reply_to_message.from_user.first_name
+            bot.reply_to(message, f"مبروك! {user_name} تزوج {target_name} 👰‍♀️🤵‍♂️")
+        else:
+            bot.reply_to(message, f"مين تبي تتزوج يا {user_name}؟ 😅")
+        
+    elif text == 'احبك':
+        if message.reply_to_message:
+            target_name = message.reply_to_message.from_user.first_name
+            bot.reply_to(message, f"واو! {user_name} يحب {target_name} 😍")
+        else:
+            bot.reply_to(message, f"انا كمان بحبك يا {user_name} 😘")
+        
+    elif text in ['بوسه', 'بوسة']:
+        if message.reply_to_message:
+            target_name = message.reply_to_message.from_user.first_name
+            bot.reply_to(message, f"💋 {user_name} بوس {target_name}")
+        else:
+            bot.reply_to(message, f"💋 خد بوسة مني يا {user_name}")
+        
+    elif text == 'تفاصيل':
+        if message.reply_to_message:
+            target = message.reply_to_message.from_user
+            creation_date = get_account_creation_date(target.id)
+            user_info = get_user_data(target.id)
+            bot.reply_to(message, f"👤 الاسم: {target.first_name}\n🆔 الايدي: {target.id}\n📅 تاريخ الانشاء: {creation_date}\n💬 عدد الرسائل: {user_info.get('messages_count', 0)}")
+        else:
+            creation_date = get_account_creation_date(message.from_user.id)
+            user_info = get_user_data(message.from_user.id)
+            bot.reply_to(message, f"👤 الاسم: {user_name}\n🆔 الايدي: {message.from_user.id}\n📅 تاريخ الانشاء: {creation_date}\n💬 عدد الرسائل: {user_info.get('messages_count', 0)}")
+        
+    elif text in ['هينه', 'هينهي', 'هينها']:
+        if message.reply_to_message:
+            target_name = message.reply_to_message.from_user.first_name
+            bot.reply_to(message, f"😠 {user_name} يهين {target_name}")
+        else:
+            bot.reply_to(message, f"😠 مين تبي تهينه يا {user_name}？")
+        
+    elif text == 'ثث':
+        try:
+            members = ['أحمد', 'فاطمة', 'محمد', 'خديجة', 'يوسف', user_name]
+            if message.reply_to_message:
+                members.append(message.reply_to_message.from_user.first_name)
+            member1, member2 = random.sample(members, 2)
+            bot.reply_to(message, f"💕 {member1} و {member2} يتثاقلون!")
+        except:
+            bot.reply_to(message, "❌ حدث خطأ!")
+
+# --- أوامر الحماية ---
+lock_commands = {
+    'قفل الملصقات': 'stickers', 'فتح الملصقات': 'stickers',
+    'قفل الصور': 'photos', 'فتح الصور': 'photos',
+    'قفل الفيديو': 'videos', 'فتح الفيديو': 'videos',
+    'قفل الدردشة': 'texts', 'فتح الدردشة': 'texts',
+    'قفل الصوتيات': 'audios', 'فتح الصوتيات': 'audios',
+    'قفل الملفات': 'documents', 'فتح الملفات': 'documents',
+    'قفل إعادة توجيه': 'forwards', 'فتح إعادة توجيه': 'forwards',
+    'قفل التاق': 'tags', 'فتح التاق': 'tags',
+    'قفل العربية': 'arabic', 'فتح العربية': 'arabic',
+    'قفل الإنجليزية': 'english', 'فتح الإنجليزية': 'english',
+    'قفل الموسيقى': 'music', 'فتح الموسيقى': 'music',
+    'قفل المعرفات': 'usernames', 'فتح المعرفات': 'usernames',
+    'قفل جهات الاتصال': 'contacts', 'فتح جهات الاتصال': 'contacts',
+    'قفل الألعاب': 'games', 'فتح الألعاب': 'games',
+    'قفل الروابط': 'links', 'فتح الروابط': 'links',
+    'قفل البوتات': 'bots', 'فتح البوتات': 'bots',
+    'قفل إشعارات الدخول': 'welcome', 'فتح إشعارات الدخول': 'welcome',
+    'قفل قران كريم': 'quran', 'فتح قران كريم': 'quran'
+}
+
+@bot.message_handler(func=lambda m: m.text in lock_commands.keys())
+def handle_lock_commands(message):
+    if not is_group_chat(message.chat.id) or not can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    command = message.text
+    setting_type = lock_commands[command]
+    action = "قفل" if command.startswith("قفل") else "فتح"
+    
+    chat_id_str = str(message.chat.id)
+    if chat_id_str not in group_settings:
+        group_settings[chat_id_str] = {}
+    
+    group_settings[chat_id_str][setting_type] = (action == "قفل")
+    save_data(GROUP_SETTINGS_FILE, group_settings)
+    
+    bot.reply_to(message, f"✅ تم {command} بنجاح!")
+
+# --- أوامر الإدارة ---
+@bot.message_handler(func=lambda m: m.text in ['كتم', 'حظر', 'فك كتم', 'فك حظر'] and m.reply_to_message)
+def manage_users(message):
+    if not is_group_chat(message.chat.id) or not can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    user_id = message.reply_to_message.from_user.id
+    command = message.text
+    
+    try:
+        if command == 'كتم':
+            bot.restrict_chat_member(message.chat.id, user_id, can_send_messages=False)
+            bot.reply_to(message, f"✅ تم كتم المستخدم")
+        elif command == 'حظر':
+            bot.ban_chat_member(message.chat.id, user_id)
+            bot.reply_to(message, f"✅ تم حظر المستخدم")
+        elif command == 'فك كتم':
+            bot.restrict_chat_member(message.chat.id, user_id, can_send_messages=True)
+            bot.reply_to(message, f"✅ تم فك كتم المستخدم")
+        elif command == 'فك حظر':
+            bot.unban_chat_member(message.chat.id, user_id)
+            bot.reply_to(message, f"✅ تم فك حظر المستخدم")
+    except Exception as e:
+        bot.reply_to(message, f"❌ خطأ: {e}")
+
+@bot.message_handler(func=lambda m: m.text.startswith(('رفع مشرف', 'تنزيل مشرف', 'رفع مميز', 'تنزيل مميز')) and m.reply_to_message)
+def manage_roles(message):
+    if not is_group_chat(message.chat.id) or not can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    target_user = message.reply_to_message.from_user
+    chat_id_str = str(message.chat.id)
+    user_id_str = str(target_user.id)
+    
+    if chat_id_str not in group_roles:
+        group_roles[chat_id_str] = {'admins': [], 'vips': []}
+    
+    if message.text.startswith('رفع مشرف'):
+        if user_id_str not in group_roles[chat_id_str]['admins']:
+            group_roles[chat_id_str]['admins'].append(user_id_str)
+            save_data(GROUP_ROLES_FILE, group_roles)
+            bot.reply_to(message, f"✅ تم رفع {target_user.first_name} مشرفاً")
+        else:
+            bot.reply_to(message, f"⚠️ هو بالفعل مشرف!")
+            
+    elif message.text.startswith('تنزيل مشرف'):
+        if user_id_str in group_roles[chat_id_str]['admins']:
+            group_roles[chat_id_str]['admins'].remove(user_id_str)
+            save_data(GROUP_ROLES_FILE, group_roles)
+            bot.reply_to(message, f"✅ تم تنزيل {target_user.first_name} من المشرفين")
+        else:
+            bot.reply_to(message, f"⚠️ ليس مشرفاً!")
+            
+    elif message.text.startswith('رفع مميز'):
+        if user_id_str not in group_roles[chat_id_str]['vips']:
+            group_roles[chat_id_str]['vips'].append(user_id_str)
+            save_data(GROUP_ROLES_FILE, group_roles)
+            bot.reply_to(message, f"✅ تم رفع {target_user.first_name} مميزاً")
+        else:
+            bot.reply_to(message, f"⚠️ هو بالفعل مميز!")
+            
+    elif message.text.startswith('تنزيل مميز'):
+        if user_id_str in group_roles[chat_id_str]['vips']:
+            group_roles[chat_id_str]['vips'].remove(user_id_str)
+            save_data(GROUP_ROLES_FILE, group_roles)
+            bot.reply_to(message, f"✅ تم تنزيل {target_user.first_name} من المميزين")
+        else:
+            bot.reply_to(message, f"⚠️ ليس مميزاً!")
+
+# --- أوامر الاقتصاد ---
+@bot.message_handler(func=lambda m: m.text in ['انشاء حساب بنكي', 'حسابي', 'فلوسي', 'راتب'])
+def economy_commands(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    user_data = get_user_data(message.from_user.id)
+    user_name = message.from_user.first_name
+    
+    if message.text == 'انشاء حساب بنكي':
+        if user_data.get('bank_account'):
+            bot.reply_to(message, "❌ لديك حساب بنكي بالفعل!")
+            return
+            
+        banks = ["البنك الوطني", "القرض الشعبي", "البنك الخارجي", "بنك البركة"]
+        account_number = ''.join(random.choices(string.digits, k=10))
+        user_data['bank_account'] = {
+            'bank': random.choice(banks),
+            'number': account_number,
+            'balance': random.randint(1000, 5000)
+        }
+        update_user_data(message.from_user.id, user_data)
+        bot.reply_to(message, f"✅ تم إنشاء حساب بنكي في {user_data['bank_account']['bank']}\nرقم الحساب: {account_number}")
+        
+    elif message.text in ['حسابي', 'فلوسي']:
+        if user_data.get('bank_account'):
+            bank_info = user_data['bank_account']
+            job_text = f"💼 الوظيفة: {user_data.get('job', 'لا يوجد')}" 
+            money_text = f"💵 النقود: {user_data.get('money', 0)}$"
+            bot.reply_to(message, f"🏦 البنك: {bank_info['bank']}\n🔢 رقم الحساب: {bank_info['number']}\n💰 الرصيد: {bank_info['balance']} دينار\n{job_text}\n{money_text}")
+        else:
+            money_text = f"💵 النقود: {user_data.get('money', 0)}$"
+            job_text = f"💼 الوظيفة: {user_data.get('job', 'لا يوجد')}"
+            bot.reply_to(message, f"❌ ليس لديك حساب بنكي!\n{job_text}\n{money_text}\nاكتب 'انشاء حساب بنكي' لإنشاء حساب")
+            
+    elif message.text == 'راتب':
+        if not user_data.get('job'):
+            bot.reply_to(message, "❌ ليس لديك وظيفة! اكتب 'عمل' لرؤية الوظائف المتاحة")
+            return
+            
+        now = time.time()
+        last_salary = user_data.get('last_salary')
+        
+        # التحقق من الوقت المنقضي منذ آخر راتب
+        if last_salary:
+            # التأكد من أن last_salary هو رقم وليس نص
+            try:
+                last_salary = float(last_salary)
+            except (ValueError, TypeError):
+                # إذا كان هناك خطأ في القيمة، نعطي المستخدم راتب جديد
+                last_salary = None
+            
+            if last_salary and (now - last_salary) < 86400:  # 24 ساعة
+                remaining = 86400 - (now - last_salary)
+                hours = int(remaining // 3600)
+                minutes = int((remaining % 3600) // 60)
+                bot.reply_to(message, f"⏳ يجب الانتظار {hours} ساعة و {minutes} دقيقة للراتب التالي")
+                return
+            
+        job_info = JOBS[user_data['job']]
+        salary = random.randint(job_info['min_salary'], job_info['max_salary'])
+        
+        # التأكد من أن money هو رقم
+        current_money = user_data.get('money', 0)
+        try:
+            current_money = int(current_money)
+        except (ValueError, TypeError):
+            current_money = 0
+            
+        user_data['money'] = current_money + salary
+        user_data['last_salary'] = now  # حفظ كرقم وليس نص
+        
+        update_user_data(message.from_user.id, user_data)
+        bot.reply_to(message, f"💰 حصلت على راتب {salary} دولار\n💼 وظيفتك: {user_data['job']} {job_info['emoji']}\n💵 الرصيد الجديد: {user_data['money']} دولار")
+
+@bot.message_handler(func=lambda m: m.text == 'عمل')
+def show_jobs(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    jobs_text = "💼 الوظائف المتاحة:\n"
+    for job, info in JOBS.items():
+        jobs_text += f"{info['emoji']} {job}: {info['min_salary']}-{info['max_salary']}$\n"
+    jobs_text += "\nرد على هذه الرسالة بكتابة 'وظيفة [اسم الوظيفة]'"
+    bot.reply_to(message, jobs_text)
+
+@bot.message_handler(func=lambda m: m.text.startswith('وظيفة '))
+def apply_job(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    job_name = message.text[6:].strip()
+    if job_name not in JOBS:
+        bot.reply_to(message, "❌ هذه الوظيفة غير موجودة! استخدم 'عمل' لرؤية الوظائف المتاحة")
+        return
+        
+    user_data = get_user_data(message.from_user.id)
+    user_data['job'] = job_name
+    update_user_data(message.from_user.id, user_data)
+    bot.reply_to(message, f"✅ تم تعيينك كـ {job_name} {JOBS[job_name]['emoji']}!")
+
+@bot.message_handler(func=lambda m: m.text.startswith('روح ') and m.reply_to_message)
+def transfer_money(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    try:
+        amount = int(message.text.split()[1])
+        if amount <= 0:
+            bot.reply_to(message, "❌ المبلغ يجب أن يكون أكبر من الصفر!")
+            return
+            
+        sender_data = get_user_data(message.from_user.id)
+        
+        # التأكد من أن money هو رقم
+        sender_money = sender_data.get('money', 0)
+        try:
+            sender_money = int(sender_money)
+        except (ValueError, TypeError):
+            sender_money = 0
+            
+        if sender_money < amount:
+            bot.reply_to(message, "❌ لا تملك ما يكفي من المال!")
+            return
+            
+        receiver_id = message.reply_to_message.from_user.id
+        receiver_data = get_user_data(receiver_id)
+        
+        # التأكد من أن money هو رقم للمستلم أيضا
+        receiver_money = receiver_data.get('money', 0)
+        try:
+            receiver_money = int(receiver_money)
+        except (ValueError, TypeError):
+            receiver_money = 0
+        
+        sender_data['money'] = sender_money - amount
+        receiver_data['money'] = receiver_money + amount
+        
+        update_user_data(message.from_user.id, sender_data)
+        update_user_data(receiver_id, receiver_data)
+        
+        bot.reply_to(message, f"✅ تم تحويل {amount}$ إلى {message.reply_to_message.from_user.first_name}")
+    except ValueError:
+        bot.reply_to(message, "❌ استخدم: روح [المبلغ] بالرد على الشخص\nمثال: روح 100")
+    except Exception as e:
+        bot.reply_to(message, f"❌ حدث خطأ: {e}")
+
+# تحميل بيانات المستخدم مع معالجة الأخطاء
+def get_user_data(user_id):
+    user_id_str = str(user_id)
+    if user_id_str not in user_data:
+        user_data[user_id_str] = {
+            "money": 1000,
+            "job": None,
+            "last_salary": None,
+            "married_to": None,
+            "last_daily": None,
+            "bank_account": None,
+            "messages_count": 0,
+            "rob_count": 0,
+            "rob_success": 0,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        save_data(USER_DATA_FILE, user_data)
+    
+    # التأكد من أن جميع القيم الرقمية هي أرقام وليس نصوص
+    user_info = user_data[user_id_str]
+    
+    # إصلاح قيمة money
+    if 'money' in user_info:
+        try:
+            user_info['money'] = int(user_info['money'])
+        except (ValueError, TypeError):
+            user_info['money'] = 1000  # قيمة افتراضية إذا كانت غير صالحة
+    
+    # إصلاح قيمة last_salary
+    if 'last_salary' in user_info and user_info['last_salary'] is not None:
+        try:
+            user_info['last_salary'] = float(user_info['last_salary'])
+        except (ValueError, TypeError):
+            user_info['last_salary'] = None
+    
+    return user_info
+
+# تحديث بيانات المستخدم
+def update_user_data(user_id, data):
+    user_id_str = str(user_id)
+    user_data[user_id_str] = data
+    save_data(USER_DATA_FILE, user_data)
+
+@bot.message_handler(func=lambda m: m.text == 'مهر' and m.reply_to_message)
+def marriage(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    user_data = get_user_data(message.from_user.id)
+    target_data = get_user_data(message.reply_to_message.from_user.id)
+    
+    if user_data['married_to']:
+        bot.reply_to(message, "❌ أنت متزوج بالفعل!")
+        return
+        
+    if target_data['married_to']:
+        bot.reply_to(message, "❌ هذا الشخص متزوج بالفعل!")
+        return
+        
+    mahr_amount = 1000
+    if user_data['money'] < mahr_amount:
+        bot.reply_to(message, f"❌ تحتاج إلى {mahr_amount}$ للمهر!")
+        return
+        
+    user_data['money'] -= mahr_amount
+    user_data['married_to'] = message.reply_to_message.from_user.id
+    target_data['married_to'] = message.from_user.id
+    
+    update_user_data(message.from_user.id, user_data)
+    update_user_data(message.reply_to_message.from_user.id, target_data)
+    
+    bot.reply_to(message, f"💍 مبروك! تزوجت من {message.reply_to_message.from_user.first_name}!")
+
+@bot.message_handler(func=lambda m: m.text.startswith('كود '))
+def use_code(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    code = message.text[5:].strip().upper()
+    if code not in codes_data:
+        bot.reply_to(message, "❌ الكود غير صحيح!")
+        return
+        
+    code_info = codes_data[code]
+    if code_info['used']:
+        bot.reply_to(message, "❌ هذا الكود مستخدم بالفعل!")
+        return
+        
+    user_data = get_user_data(message.from_user.id)
+    user_data['money'] += code_info['amount']
+    code_info['used'] = True
+    codes_data[code] = code_info
+    
+    update_user_data(message.from_user.id, user_data)
+    save_data(CODES_FILE, codes_data)
+    
+    bot.reply_to(message, f"✅ تم استبدال الكود! +{code_info['amount']}$")
+
+# --- أوامر التوب ---
+@bot.message_handler(func=lambda m: m.text in ['توب', 'توب الفلوس', 'توب الحرامية', 'توب الحراميه', 'توب الزرف'])
+def top_commands(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    if message.text == 'توب':
+        bot.reply_to(message, "📊 أوامر التوب:\nتوب الفلوس - توب الحرامية - توب الزرف")
+        return
+        
+    # نموذج مبسط للتوب
+    top_users = [
+        {"name": "أحمد", "value": 15000},
+        {"name": "فاطمة", "value": 12000},
+        {"name": "محمد", "value": 9500},
+        {"name": message.from_user.first_name, "value": random.randint(1000, 5000)}
+    ]
+    top_users.sort(key=lambda x: x["value"], reverse=True)
+    
+    if message.text == 'توب الفلوس':
+        text = "🏆 توب الفلوس:\n"
+        for i, user in enumerate(top_users[:5], 1):
+            text += f"{i}. {user['name']} - {user['value']}$\n"
+        bot.reply_to(message, text)
+        
+    elif message.text in ['توب الحرامية', 'توب الحراميه', 'توب الزرف']:
+        text = "🏆 توب الحرامية:\n"
+        for i, user in enumerate(top_users[:5], 1):
+            text += f"{i}. {user['name']} - {user['value']} عملية\n"
+        bot.reply_to(message, text)
+
+# --- أوامر المعلومات ---
+@bot.message_handler(func=lambda m: m.text in ['رتبتي', 'المالك', 'المشرفين', 'قائمة المشرفين', 'ايدي', 'id', 'الايدي', 'المطور', 'مطور'])
+def info_commands(message):
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    if message.text in ['رتبتي']:
+        role = get_user_role(message.chat.id, message.from_user.id)
+        role_text = {
+            'admin': 'مشرف البوت', 'vip': 'مميز',
+            'group_admin': 'مشرف المجموعة', 'member': 'عضو'
+        }.get(role, 'عضو')
+        bot.reply_to(message, f"📊 رتبتك: {role_text}")
+        
+    elif message.text in ['المالك', 'المشرفين', 'قائمة المشرفين']:
+        try:
+            admins = bot.get_chat_administrators(message.chat.id)
+            admin_list = "👥 المشرفين:\n"
+            for admin in admins:
+                status = "👑 مالك" if admin.status == 'creator' else "🛡️ مشرف"
+                admin_list += f"{status} - {admin.user.first_name}\n"
+            bot.reply_to(message, admin_list)
+        except:
+            bot.reply_to(message, "❌ لا يمكن جلب قائمة المشرفين")
+            
+    elif message.text in ['ايدي', 'id', 'الايدي']:
+        try:
+            target = message.reply_to_message.from_user if message.reply_to_message else message.from_user
+            chat_id = message.chat.id
+
+            # الاسم الكامل
+            name = target.first_name
+            if target.last_name:
+                name += " " + target.last_name
+
+            # المعرف
+            username = f"@{target.username}" if target.username else "لا يوجد"
+
+            # الرتبة في المجموعة
+            try:
+                member = bot.get_chat_member(chat_id, target.id)
+                status_map = {
+                    'creator': '👑 مالك المجموعة',
+                    'administrator': '🛡️ مشرف المجموعة',
+                    'member': '👤 عضو'
+                }
+                rank = status_map.get(member.status, '👤 عضو')
+                title = member.custom_title or "لا يوجد"
+            except:
+                rank = "👤 عضو"
+                title = "لا يوجد"
+
+            # البايو
+            bio = "لا يوجد"
+            try:
+                full_user = bot.get_chat(target.id)
+                if full_user.bio:
+                    bio = full_user.bio
+            except:
+                bio = "لا يمكن جلب البايو"
+
+            # عد الرسائل (يمكنك إضافة طريقة لحساب الرسائل هنا)
+            msg_count = "0"  # يمكن تطويره لاحقًا
+
+            # تاريخ إنشاء الحساب (تقدير واقعي)
+            try:
+                user_id_num = target.id
+                if user_id_num < 2_000_000_000:
+                    creation_date_str = "2018/01/01"
+                elif user_id_num < 4_000_000_000:
+                    creation_date_str = "2020/06/01"
+                elif user_id_num < 6_000_000_000:
+                    creation_date_str = "2022/01/01"
+                elif user_id_num < 8_000_000_000:
+                    creation_date_str = "2023/06/01"
+                else:
+                    creation_date_str = "2024/01/01"
+            except:
+                creation_date_str = "غير معروف"
+
+            # بناء النص (بدون Markdown لتجنب الأخطاء)
+            info_text = (
+                f"ɴᴀᴍᴇ- {name}\n"
+                f"ᴜѕᴇ- {username}\n"
+                f"ѕᴛᴀ- {rank}\n"
+                f"ᴍѕɢ- {msg_count}\n"
+                f"ɪᴅ- {target.id}\n"
+                f"ᴛɪᴛʟᴇ- {title}\n"
+                f"ʙɪᴏ- {bio}\n"
+                f"ᴄʀᴇᴀᴛᴇ- {creation_date_str}"
+            )
+
+            # جلب الصورة
+            try:
+                photos = bot.get_user_profile_photos(target.id, limit=1)
+                if photos.total_count > 0:
+                    file_id = photos.photos[0][0].file_id
+                    bot.send_photo(chat_id, file_id, caption=info_text)
+                else:
+                    bot.reply_to(message, info_text)
+            except Exception as e:
+                bot.reply_to(message, info_text)
+                logger.error(f"Error fetching user photo: {e}")
+
+        except Exception as e:
+            bot.reply_to(message, "❌ حدث خطأ أثناء جلب المعلومات.")
+            logger.error(f"Error in show_id: {e}")
+        
+    elif message.text in ['المطور', 'مطور']:
+        # الحصول على صورة المطور وتحديثها
+        photo_data = get_developer_photo()
+        
+        if photo_data:
+            # إرسال الصورة مع معلومات المطور
+            bot.send_photo(message.chat.id, photo_data, 
+                          caption="👨‍💻 المطور: MAYKEL\n🔗 @MBl_py\n🆔 5545019702")
+        else:
+            bot.reply_to(message, "👨‍💻 المطور: MAYKEL\n🔗 @MBl_py\n🆔 5545019702")
+
+# --- أوامر الإعدادات ---
+@bot.message_handler(func=lambda m: m.text in ['الاعدادات', '/settings'])
+def settings_command(message):
+    if not is_group_chat(message.chat.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    text = """
+🛡️ أوامر الحماية:
+
+قفل/فتح الملصقات
+قفل/فتح الصور
+قفل/فتح الفيديو
+قفل/فتح الدردشة
+قفل/فتح الصوتيات
+قفل/فتح الملفات
+قفل/فتح إعادة توجيه
+قفل/فتح التاق
+قفل/فتح العربية
+قفل/فتح الإنجليزية
+قفل/فتح الموسيقى
+قفل/فتح المعرفات
+قفل/فتح جهات الاتصال
+قفل/فتح الألعاب
+قفل/فتح الروابط
+قفل/فتح البوتات
+قفل/فتح إشعارات الدخول
+قفل/فتح قران كريم
+
+👥 أوامر الإدارة:
+كتم/حظر/فك كتم/فك حظر (بالرد)
+رفع/تنزيل مشرف/مميز (بالرد)
+
+💰 أوامر الاقتصاد:
+انشاء حساب بنكي
+حسابي
+فلوسي
+راتب
+عمل
+روح [المبلغ] (بالرد)
+مهر (بالرد)
+كود [الكود]
+
+🎮 أوامر الترفيه:
+ثث، كتاب، نرد، زوجني، احبك، بوسة، تفاصيل، هينه
+
+⌯قم بالرد هلى أي شخص وكتابة كل تلك الاومر
+
+📊 أوامر التوب:
+توب، توب الفلوس، توب الحرامية، توب الزرف
+
+ℹ️ أوامر المعلومات:
+رتبتي، المالك، المشرفين، ايدي، المطور
+"""
+    bot.reply_to(message, text)
+
+# --- أوامر المطور ---
+@bot.message_handler(func=lambda m: m.text.startswith(('رفع_ادمن', 'حذف_ادمن', 'تعيين_المالك')) and m.reply_to_message)
+def developer_commands(message):
+    if not is_owner(message.from_user.id):
+        return
+        
+    target_user = message.reply_to_message.from_user
+    
+    if message.text.startswith('رفع_ادمن'):
+        if target_user.id in admins_data['admins']:
+            bot.reply_to(message, "⚠️ هو بالفعل ادمن!")
+        else:
+            admins_data['admins'].append(target_user.id)
+            save_data(ADMINS_FILE, admins_data)
+            bot.reply_to(message, f"✅ تم رفع {target_user.first_name} ادمن!")
+            
+    elif message.text.startswith('حذف_ادمن'):
+        if target_user.id in admins_data['admins']:
+            admins_data['admins'].remove(target_user.id)
+            save_data(ADMINS_FILE, admins_data)
+            bot.reply_to(message, f"✅ تم حذف {target_user.first_name} من الادمن!")
+        else:
+            bot.reply_to(message, "⚠️ ليس ادمن!")
+            
+    elif message.text.startswith('تعيين_المالك'):
+        admins_data['owner'] = target_user.id
+        save_data(ADMINS_FILE, admins_data)
+        bot.reply_to(message, f"✅ تم تعيين {target_user.first_name} مالكاً جديداً!")
+
+@bot.message_handler(func=lambda m: m.text.startswith('انشاء_كود ') and is_admin(m.from_user.id))
+def create_code_command(message):
+    try:
+        amount = int(message.text.split()[1])
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        codes_data[code] = {'amount': amount, 'used': False, 'created_by': message.from_user.id}
+        save_data(CODES_FILE, codes_data)
+        bot.reply_to(message, f"✅ تم إنشاء كود: {code}\n💰 القيمة: {amount}$")
+    except:
+        bot.reply_to(message, "❌ استخدم: انشاء_كود [المبلغ]")
+
+# --- معالجة المحتوى في المجموعات ---
+@bot.message_handler(content_types=['text', 'photo', 'video', 'audio', 'document', 'sticker', 'animation', 'voice', 'video_note', 'contact', 'location', 'venue', 'poll', 'dice'])
+def handle_group_content(message):
+    if not is_group_chat(message.chat.id):
+        return
+        
+    # زيادة عدد رسائل المستخدم
+    user_info = get_user_data(message.from_user.id)
+    user_info['messages_count'] = user_info.get('messages_count', 0) + 1
+    update_user_data(message.from_user.id, user_info)
+        
+    chat_id_str = str(message.chat.id)
+    if chat_id_str not in group_settings:
+        return
+        
+    # السماح للمسؤولين والمشرفين بإرسال أي محتوى
+    if can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    settings = group_settings[chat_id_str]
+    content_type = message.content_type
+    
+    # منع الأوامر التي تبدأ بـ "قفل" أو "فتح" من الأعضاء العاديين
+    if content_type == 'text' and (message.text.startswith('قفل') or message.text.startswith('فتح')):
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+            bot.send_message(message.chat.id, "❌ ليس لديك صلاحية لاستخدام هذا الأمر!")
+        except:
+            pass
+        return
+    
+    # التحقق من أنواع المحتوى المقفولة
+    if ((content_type == 'sticker' and settings.get('stickers', False)) or
+        (content_type == 'photo' and settings.get('photos', False)) or
+        (content_type == 'video' and settings.get('videos', False)) or
+        (content_type == 'text' and settings.get('texts', False)) or
+        (content_type == 'audio' and settings.get('audios', False)) or
+        (content_type == 'document' and settings.get('documents', False)) or
+        (content_type == 'animation' and settings.get('animations', False)) or
+        (content_type == 'voice' and settings.get('voices', False)) or
+        (content_type == 'video_note' and settings.get('video_notes', False)) or
+        (content_type == 'contact' and settings.get('contacts', False)) or
+        (content_type == 'location' and settings.get('locations', False)) or
+        (content_type == 'poll' and settings.get('polls', False)) or
+        (content_type == 'dice' and settings.get('dice', False))):
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+            warning_msg = bot.send_message(message.chat.id, f"⚠️ {message.from_user.first_name}، هذا النوع من المحتوى مقفل حالياً!")
+            time.sleep(3)
+            bot.delete_message(message.chat.id, warning_msg.message_id)
+        except:
+            pass
+
+# في قسم الإعدادات، أضف متغيرًا لتتبع وقت آخر قفل للقرآن
+group_quran_lock_times = {}
+
+# في قسم أوامر القفل، عدل أمر قفل/فتح القرآن
+@bot.message_handler(func=lambda m: m.text in ['قفل قران كريم', 'فتح قران كريم'])
+def handle_quran_lock(message):
+    if not is_group_chat(message.chat.id) or not can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    # التحقق من الاشتراك
+    if not check_subscription(message.from_user.id):
+        send_subscription_message(message.chat.id, message.from_user.id)
+        return
+        
+    command = message.text
+    chat_id_str = str(message.chat.id)
+    
+    if chat_id_str not in group_settings:
+        group_settings[chat_id_str] = {}
+    
+    if command == 'قفل قران كريم':
+        group_settings[chat_id_str]['quran'] = True
+        # حفظ وقت القفل لهذه المجموعة
+        group_quran_lock_times[chat_id_str] = time.time()
+        bot.reply_to(message, "✅ تم قفل القرآن الكريم، سيتم إرسال آية كل 15 دقيقة")
+    else:
+        group_settings[chat_id_str]['quran'] = False
+        # إزالة المجموعة من نظام التوقيت عند الفتح
+        if chat_id_str in group_quran_lock_times:
+            del group_quran_lock_times[chat_id_str]
+        bot.reply_to(message, "✅ تم فتح القرآن الكريم")
+    
+    save_data(GROUP_SETTINGS_FILE, group_settings)
+
+# أضف هذا المتغير في بداية الملف مع المتغيرات الأخرى
+group_quran_lock_times = {}
+
+# عدل وظيفة إرسال الآيات القرآنية
+def send_quran_verses():
+    global verse_index
+    if not send_verses_enabled:
+        return
+        
+    current_time = time.time()
+    
+    for chat_id_str in group_settings.keys():
+        try:
+            # التحقق إذا كان القرآن مقفولاً في هذه المجموعة
+            if group_settings[chat_id_str].get('quran', False):
+                # التحقق إذا مر 15 دقيقة منذ آخر إرسال
+                last_sent = group_quran_lock_times.get(chat_id_str, 0)
+                if current_time - last_sent >= 900:  # 900 ثانية = 15 دقيقة
+                    chat_id = int(chat_id_str)
+                    verse = QURAN_VERSES[verse_index]
+                    bot.send_message(chat_id, f"📖 آية قرآنية:\n\n{verse}")
+                    # تحديث وقت آخر إرسال لهذه المجموعة
+                    group_quran_lock_times[chat_id_str] = current_time
+                    verse_index = (verse_index + 1) % len(QURAN_VERSES)
+                    
+        except Exception as e:
+            logger.error(f"Error sending verse to group {chat_id_str}: {e}")
+    
+    verse_index = (verse_index + 1) % len(QURAN_VERSES)
+
+# عدل وظيفة الجدولة
+def schedule_verses():
+    schedule.every(1).minutes.do(send_quran_verses)  # التحقق كل دقيقة
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# --- معالجة كلمات خاصة ---
+@bot.message_handler(func=lambda message: message.text and 
+                     any(keyword in message.text.strip().lower() for keyword in ['خاص', 'تعال خاص', 'prv']))
+def respond_to_private_request(message):
+        # تجنب الرد على أوامر معينة
+        if any(cmd in message.text.strip().lower() for cmd in ["مسح دردشة", "حذف دردشة", "تنظيف"]):
+            return
+
+        # التحقق من أن الرسالة في مجموعة
+        if not is_group_chat(message.chat.id):
+            return
+        
+        # إنشاء زر للذهاب إلى الخاص
+        markup = telebot.types.InlineKeyboardMarkup()
+        private_btn = telebot.types.InlineKeyboardButton("اذهب إلى الخاص 🚀", url=f"https://t.me/{bot.get_me().username}")
+        markup.add(private_btn)
+
+        # إرسال الرد المضحك مع الزر
+        funny_responses = [
+            "يا جماعة، حد يقول لي هو عايزني في الخاص ليه؟ 🤔",
+            "إنتوا متعرفوش إن الخاص مش مكان آمن؟ 😏",
+            "مش عارف إيه اللي هحكيلكوا في الخاص مش هتقدرولوا تناموا 😂",
+            "في الإيد خير من ألف في الخاص! 👐",
+            "الخاص ده مكان خطير... بتكون فيه أسرار! 😎",
+            "شكلك عايز تحكيلي سر؟ تعال للخاص بس مش هضمن أمانه! 😜",
+            "الخاص؟ أنا مش دكتور نفسي عشان تيجيلي في الخاص! 🤣"
+        ]
+        selected_response = random.choice(funny_responses)
+        bot.reply_to(message, f"{selected_response}\n\nاضغط الزر عشان تشوف معجزة 👇", reply_markup=markup)
+
+# --- تحديث صورة المطور تلقائياً ---
+def update_developer_photo_periodically():
+    """تحديث صورة المطور كل ساعة"""
+    while True:
+        try:
+            get_developer_photo()
+            time.sleep(3600)  # انتظار ساعة
+        except Exception as e:
+            logger.error(f"Error in update_developer_photo_periodically: {e}")
+            time.sleep(300)  # انتظار 5 دقائق في حالة الخطأ
+
+# بدء التحديث التلقائي لصورة المطور
+photo_update_thread = threading_Thread(target=update_developer_photo_periodically)
+photo_update_thread.daemon = True
+photo_update_thread.start()
+
+# --- لوحة تحكم الإدمن ---
+@bot.message_handler(func=lambda m: m.text == 'لوحة التحكم' and is_admin(m.from_user.id))
+def admin_panel(message):
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    
+    btn1 = telebot.types.InlineKeyboardButton("إنشاء كود", callback_data="create_code")
+    btn2 = telebot.types.InlineKeyboardButton("الإحصائيات", callback_data="stats")
+    btn3 = telebot.types.InlineKeyboardButton("إرسال إشعار", callback_data="send_notification")
+    btn4 = telebot.types.InlineKeyboardButton("إدارة المجموعات", callback_data="manage_groups")
+    
+    markup.add(btn1, btn2, btn3, btn4)
+    
+    bot.reply_to(message, "👨‍💻 لوحة تحكم الإدمن:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "create_code")
+def handle_create_code(call):
+    if is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "استخدم الأمر: انشاء_كود [المبلغ]")
+    else:
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية!")
+
+@bot.callback_query_handler(func=lambda call: call.data == "stats")
+def handle_stats(call):
+    if is_admin(call.from_user.id):
+        total_users = len(user_data)
+        total_groups = len(group_settings)
+        total_codes = len(codes_data)
+        
+        stats_text = f"""
+📊 إحصائيات البوت:
+👥 عدد المستخدمين: {total_users}
+👥 عدد المجموعات: {total_groups}
+🎫 عدد الكودات: {total_codes}
+        """
+        
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, stats_text)
+    else:
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية!")
+
+@bot.callback_query_handler(func=lambda call: call.data == "send_notification")
+def handle_send_notification(call):
+    if is_admin(call.from_user.id):
+        msg = bot.send_message(call.message.chat.id, "📝 أرسل الرسالة التي تريد إشعار جميع المجموعات بها:")
+        bot.register_next_step_handler(msg, process_notification)
+    else:
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية!")
+
+def process_notification(message):
+    if is_admin(message.from_user.id):
+        sent = 0
+        failed = 0
+        
+        for chat_id_str in group_settings.keys():
+            try:
+                chat_id = int(chat_id_str)
+                if message.text:
+                    bot.send_message(chat_id, f"📢 إشعار من الإدارة:\n\n{message.text}")
+                elif message.photo:
+                    bot.send_photo(chat_id, message.photo[-1].file_id, caption=message.caption or "📢 إشعار من الإدارة")
+                sent += 1
+            except Exception as e:
+                failed += 1
+                logger.error(f"Error sending notification: {e}")
+        
+        bot.reply_to(message, f"✅ تم إرسال الإشعار:\n✅ نجح: {sent}\n❌ فشل: {failed}")
+
+@bot.callback_query_handler(func=lambda call: call.data == "manage_groups")
+def handle_manage_groups(call):
+    if is_admin(call.from_user.id):
+        groups_text = "👥 المجموعات المرتبطة بالبوت:\n\n"
+        
+        for i, (chat_id_str, settings) in enumerate(list(group_settings.items())[:10], 1):
+            try:
+                chat = bot.get_chat(int(chat_id_str))
+                groups_text += f"{i}. {chat.title} (ID: {chat_id_str})\n"
+            except:
+                groups_text += f"{i}. مجموعة غير متاحة (ID: {chat_id_str})\n"
+        
+        if len(group_settings) > 10:
+            groups_text += f"\n+ {len(group_settings) - 10} مجموعة أخرى..."
+        
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, groups_text)
+    else:
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية!")
+
+# --- معالجة إعادة التوجيه ---
+@bot.message_handler(content_types=['pinned_message', 'forward_from', 'forward_from_chat'])
+def handle_forwarded_messages(message):
+    if not is_group_chat(message.chat.id):
+        return
+        
+    chat_id_str = str(message.chat.id)
+    if chat_id_str not in group_settings:
+        return
+        
+    # السماح للمسؤولين والمشرفين بإرسال أي محتوى
+    if can_manage_users(message.chat.id, message.from_user.id):
+        return
+        
+    settings = group_settings[chat_id_str]
+    
+    # التحقق من إعادة التوجيه المقفولة
+    if settings.get('forwards', False):
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+            warning_msg = bot.send_message(message.chat.id, f"⚠️ {message.from_user.first_name}، إعادة التوجيه مقفلة حالياً!")
+            time.sleep(3)
+            bot.delete_message(message.chat.id, warning_msg.message_id)
+        except:
+            pass
+
+# --- حفظ صورة المستخدم عند طلب الايدي ---
+@bot.message_handler(func=lambda m: m.text in ['ايدي', 'id', 'الايدي'] and m.reply_to_message)
+def save_user_photo_on_id_request(message):
+    target = message.reply_to_message.from_user
+    
+    try:
+        # محاولة الحصول على صورة المستخدم
+        user_profile = bot.get_chat(target.id)
+        
+        if user_profile.photo:
+            # الحصول على أكبر حجم للصورة
+            file_info = bot.get_file(user_profile.photo.big_file_id)
+            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+            
+            # حفظ معلومات الصورة
+            save_user_photo(target.id, user_profile.photo.big_file_id, photo_url)
+    except Exception as e:
+        logger.error(f"Error saving user photo: {e}")
+
+# --- أمر تغيير الصورة ---
+@bot.message_handler(func=lambda m: m.text == 'تغيير الصورة' and m.reply_to_message)
+def change_photo_command(message):
+    target = message.reply_to_message.from_user
+    
+    try:
+        # محاولة الحصول على صورة المستخدم
+        user_profile = bot.get_chat(target.id)
+        
+        if user_profile.photo:
+            # الحصول على أكبر حجم للصورة
+            file_info = bot.get_file(user_profile.photo.big_file_id)
+            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}"
+            
+            # حفظ معلومات الصورة
+            save_user_photo(target.id, user_profile.photo.big_file_id, photo_url)
+            bot.reply_to(message, "✅ تم تحديث صورة المستخدم!")
+        else:
+            bot.reply_to(message, "❌ لا يوجد صورة للمستخدم!")
+    except Exception as e:
+        logger.error(f"Error changing user photo: {e}")
+        bot.reply_to(message, "❌ حدث خطأ في تحديث الصورة!")
+
+# --- تشغيل البوت ---
+import time
+
+def start_bot():
+    while True:
+        try:
+            print("✅ بدأ تشغيل البوت...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"❌ حدث خطأ: {e}")
+            print("🔄 إعادة تشغيل البوت خلال 10 ثواني...")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    print("✅ تم تشغيل البوت بنجاح!")
+    get_developer_photo()
+    start_bot()
+    
+    # تحديث صورة المطور عند البدء
+    get_developer_photo()
+    
+    bot.infinity_polling()
